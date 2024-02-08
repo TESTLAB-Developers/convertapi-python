@@ -1,5 +1,5 @@
 # Convert.com Python API
-`convertapi-python` is a python library was created to interface with the REST API for
+`convertapi-python` is a python library that was created to interface with the REST API for
 [Convert.com's](https://www.convert.com) conversion rate testing tool.
 
 For more information, please see: https://www.campaigntrip.com
