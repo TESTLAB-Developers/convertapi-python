@@ -30,6 +30,7 @@ TODO: Make this into an actual client (object-oriented).
 
 import json
 import logging
+import traceback
 
 import hmac
 import hashlib
@@ -51,6 +52,7 @@ log = logging.getLogger()
 LIST_EXPERIENCES_URL = "https://api.convert.com/api/v2/accounts/{account_id}/projects/{project_id}/experiences"
 LIST_PROJECTS_URL = "https://api.convert.com/api/v2/accounts/{account_id}/projects"
 GET_EXPERIENCE_URL = "https://api.convert.com/api/v2/accounts/{account_id}/projects/{project_id}/experiences/{experience_id}"
+GET_EXPERIENCE_DAILY_REPORT_URL = "https://api.convert.com/api/v2/accounts/{account_id}/projects/{project_id}/experiences/{experience_id}/daily_report"
 #GET_VARIATIONS_URL = "https://api.convert.com/api/v2/accounts/{account_id}/projects/{project_id}/experiences/{experience_id}/variations/{variation_id}"
 
 def doRequest(url, method, extra_headers, **opts):
@@ -76,29 +78,35 @@ def doRequest(url, method, extra_headers, **opts):
         else:
             raise ValueError('Undefined HTTP method "{}"'.format(method))
 
-        d = r.json()
-        log.debug("Response ({}): {}".format(r.status_code, d))
-        if verbose > 1:
-            log.debug(json.dumps(d, indent=2))
+        d = None
+        if r.status_code != 204 and \
+                r.headers["content-type"].strip().startswith("application/json"):
+            d = r.json()
 
-        if r.status_code >= 200 and r.status_code <= 202:
+            log.debug("Response ({}): {}".format(r.status_code, d))
             if verbose > 1:
-                log.debug("Success!")
-            return d["data"] if getData else d
+                log.debug(json.dumps(d, indent=2))
 
-        if r.status_code >= 400:
+            if r.status_code >= 200 and r.status_code <= 202:
+                if verbose > 1:
+                    log.debug("Success!")
+                return d["data"] if getData else d
+
+        if r.status_code >= 400 and d != None:
             if d["isError"]:
                 log.error("Received an error response ({}) making {} request to '{}': {}".format(
                     r.status_code, method, url, d["message"]))
             else:
                 log.error("Received bad status code '{}' when making {} request to '{}': {}".format(
                     r.status_code, method, url, r.content))
-        else:
+        elif d == None:
             log.error("Unknown response ({}) when making {} request to url '{}': {}".format(
                 r.status_code, method, url, r.content))
     except Exception as e:
         log.error("Failed to do {} request to '{}' with error: {}".format(
             method, url, e))
+        log.error("Request error contet: {}".format(str(r.content)))
+        log.error(traceback.format_exc())
     return False
 
 
@@ -238,3 +246,82 @@ def getExperienceVariantMaps(account_id, project_id, **kwargs):
 
     return (eMap, vMap)
 
+
+def getExperienceStats(account_id, project_id, experience_id, **kwargs):
+    verbose = kwargs.get('verbose', 0)
+
+    u = GET_EXPERIENCE_URL.format(
+        account_id=account_id,
+        project_id=project_id,
+        experience_id=experience_id
+    )
+
+    application_id = kwargs.get('application_id')
+    secret = kwargs.get('secret')
+
+    expires_datetime = datetime.now(tz=None) + timedelta(seconds=30)
+    expires_timestamp = int(expires_datetime.timestamp())
+
+    # We want variation data to be expanded
+    body = json.dumps({
+        'include': ["variations", "stats"],
+        'expand': ["variations"]
+    })
+
+    s = getAuthSignature(application_id, expires_timestamp, u, body, secret)
+    log.debug("Signature: \"{}\"".format(s))
+
+    method = 'GET'
+    opts = {
+        "verbose": verbose,
+        "body": body
+    }
+
+    data = doRequest(u, method, {
+        "Expires": str(expires_timestamp),
+        "Convert-Application-ID": application_id,
+        "Authorization": "Convert-HMAC-SHA256 Signature={}".format(s)
+    }, **opts)
+
+    return data
+
+def getExperienceReport(account_id, project_id, experience_id, **kwargs):
+    verbose = kwargs.get('verbose', 0)
+
+    u = GET_EXPERIENCE_DAILY_REPORT_URL.format(
+        account_id=account_id,
+        project_id=project_id,
+        experience_id=experience_id
+    )
+
+    application_id = kwargs.get('application_id')
+    secret = kwargs.get('secret')
+
+    expires_datetime = datetime.now(tz=None) + timedelta(seconds=30)
+    expires_timestamp = int(expires_datetime.timestamp())
+
+    # We want variation data to be expanded
+    body = ""
+    """
+    body = json.dumps({
+        'include': ["variations", "stats"],
+        'expand': ["variations"]
+    })
+    """
+
+    s = getAuthSignature(application_id, expires_timestamp, u, body, secret)
+    log.debug("Signature: \"{}\"".format(s))
+
+    method = 'POST'
+    opts = {
+        "verbose": verbose,
+        "body": body
+    }
+
+    data = doRequest(u, method, {
+        "Expires": str(expires_timestamp),
+        "Convert-Application-ID": application_id,
+        "Authorization": "Convert-HMAC-SHA256 Signature={}".format(s)
+    }, get_data=True, **opts)
+
+    return data
