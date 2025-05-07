@@ -35,13 +35,13 @@ if __name__ == "__main__":
         log.setLevel("INFO")
 
 
-    d = convertcom.getExperienceReport(args.accountId, args.projectId, args.experienceId,
+    d = convertcom.getExperienceStats(args.accountId, args.projectId, args.experienceId,
                         application_id=args.applicationId,
                         secret=args.secret,
                         verbose=args.verbose)
     if not d:
-        log.error("Failed to get experience {expId} report in account/project {accountId}/{projectId}!".format(
-            expId = args.experienceId,
+        log.error("Failed to get experience {expId} in account/project {accountId}/{projectId}!".format(
+            expId = args.experience_id,
             accountId=args.accountId,
             projectId=args.projectId
         ))

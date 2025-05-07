@@ -8,7 +8,8 @@ import re
 import convertcom
 
 logging.basicConfig(
-    format='%(asctime)s.%(msecs)03d %(levelname)s %(module)s::%(funcName)s(): %(message)s',
+    #format='%(asctime)s.%(msecs)03d %(levelname)s %(module)s::%(funcName)s(): %(message)s',
+    format='%(asctime)s: %(message)s',
     datefmt='%Y-%m-%d %H:%M:%S',
 )
 log = logging.getLogger()
@@ -35,37 +36,69 @@ if __name__ == "__main__":
         log.setLevel("INFO")
 
 
-    d = convertcom.getExperienceStats(args.accountId, args.projectId, args.experienceId,
+    e = convertcom.getExperienceStats(args.accountId, args.projectId, args.experienceId,
                         application_id=args.applicationId,
                         secret=args.secret,
                         verbose=args.verbose)
-    if not d:
+    if not e:
         log.error("Failed to get experience {expId} in account/project {accountId}/{projectId}!".format(
             expId = args.experience_id,
             accountId=args.accountId,
             projectId=args.projectId
         ))
         exit(1)
-    print(json.dumps(d, indent=2))
-    exit()
-
-    expStr = ""
-    for e in d:
-        i = e['id']
-        n = e['name']
-        k = e['key']
-        t = e['type']
-        s = e['status']
-        if s == "active" or args.showAll:
-            expStr += "\n - {key} (id={id}, type={type}, status={status}): {name}".format(
-                key=k, id=i, type=t, status=s, name=n)
-
-    log.info("Found the following experiences in account/project {accountId}/{projectId}:{str}".format(
-        accountId=args.accountId, projectId=args.projectId, str=expStr))
+    #print(json.dumps(d, indent=2))
 
 
+    r = convertcom.getExperienceReport(args.accountId, args.projectId, args.experienceId,
+                        application_id=args.applicationId,
+                        secret=args.secret,
+                        verbose=args.verbose)
+    if not r:
+        log.error("Failed to get experience {expId} report in account/project {accountId}/{projectId}!".format(
+            expId = args.experienceId,
+            accountId=args.accountId,
+            projectId=args.projectId
+        ))
+        exit(1)
+    #print(json.dumps(d, indent=2))
 
 
-    print(json.dumps(v, indent=2))
+    totalConversions = e["stats"]["conversions"]
+
+    varKeyById = {}
+    varSplits = ""
+
+    for v in r["variations_data"]:
+        varKeyById[v["id"]] = v["key"]
+
+        varSplits += ("/" if len(varSplits) > 0 else "") + str(int(v["traffic_distribution"]))
+
+    varConvById = {}
+    for v in r["reportData"]["variations"]:
+        varConvById[v["id"]] = v["stats"][-1]["totals"]
+
+    varStr = ""
+    for i,k in varKeyById.items():
+        varStr += "\n - {k}: {c} conversions".format(k=k, c=varConvById[i])
+
+    varWinners = []
+    varWinStr = ""
+    for v in e["stats"]["variations_observed_results"]:
+        if v["test_result"] == "winner":
+            varWinners += v
+            varWinStr += "\n - {name}: improved by {percent}%".format(
+                name=v["variation_name"],
+                percent=round(v["improvement"] * 100, 2)
+            )
+
+    log.info("Fetched conversion and variation stats for experiment: {}".format(e["name"]))
+    log.info("Recorded {total} conversions across {count} variations with split: {split}{varStr}".format(
+        total=totalConversions, count=len(varKeyById), split=varSplits,
+        varStr = varStr))
+    log.info("Possible {count} winners across {totalCount} variations: {varWinStr}".format(
+        count=len(varWinners),
+        totalCount=len(varKeyById),
+        varWinStr=varWinStr))
 
 

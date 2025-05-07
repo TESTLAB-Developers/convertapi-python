@@ -38,9 +38,10 @@ import binascii
 
 from datetime import datetime, timedelta
 import time
+import re
 
 import requests
-from urllib.parse import urlencode
+from urllib.parse import urlencode, unquote
 
 
 logging.basicConfig(
@@ -53,6 +54,7 @@ LIST_EXPERIENCES_URL = "https://api.convert.com/api/v2/accounts/{account_id}/pro
 LIST_PROJECTS_URL = "https://api.convert.com/api/v2/accounts/{account_id}/projects"
 GET_EXPERIENCE_URL = "https://api.convert.com/api/v2/accounts/{account_id}/projects/{project_id}/experiences/{experience_id}"
 GET_EXPERIENCE_DAILY_REPORT_URL = "https://api.convert.com/api/v2/accounts/{account_id}/projects/{project_id}/experiences/{experience_id}/daily_report"
+GET_EXPERIENCE_AGG_REPORT_URL = "https://api.convert.com/api/v2/accounts/{account_id}/projects/{project_id}/experiences/{experience_id}/aggregated_report"
 #GET_VARIATIONS_URL = "https://api.convert.com/api/v2/accounts/{account_id}/projects/{project_id}/experiences/{experience_id}/variations/{variation_id}"
 
 def doRequest(url, method, extra_headers, **opts):
@@ -285,7 +287,7 @@ def getExperienceStats(account_id, project_id, experience_id, **kwargs):
 
     return data
 
-def getExperienceReport(account_id, project_id, experience_id, **kwargs):
+def getExperienceDailyReport(account_id, project_id, experience_id, **kwargs):
     verbose = kwargs.get('verbose', 0)
 
     u = GET_EXPERIENCE_DAILY_REPORT_URL.format(
@@ -325,3 +327,93 @@ def getExperienceReport(account_id, project_id, experience_id, **kwargs):
     }, get_data=True, **opts)
 
     return data
+
+
+def getExperienceAggregatedReport(account_id, project_id, experience_id, **kwargs):
+    verbose = kwargs.get('verbose', 0)
+
+    u = GET_EXPERIENCE_AGG_REPORT_URL.format(
+        account_id=account_id,
+        project_id=project_id,
+        experience_id=experience_id
+    )
+
+    application_id = kwargs.get('application_id')
+    secret = kwargs.get('secret')
+
+    expires_datetime = datetime.now(tz=None) + timedelta(seconds=30)
+    expires_timestamp = int(expires_datetime.timestamp())
+
+    # We want variation data to be expanded
+    #body = ""
+    body = json.dumps({
+        'metrics': ["conversion_rate", "avg_revenue_visitor", "avg_products_ordered_visitor"],
+    })
+
+    s = getAuthSignature(application_id, expires_timestamp, u, body, secret)
+    log.debug("Signature: \"{}\"".format(s))
+
+    method = 'POST'
+    opts = {
+        "verbose": verbose,
+        "body": body
+    }
+
+    data = doRequest(u, method, {
+        "Expires": str(expires_timestamp),
+        "Convert-Application-ID": application_id,
+        "Authorization": "Convert-HMAC-SHA256 Signature={}".format(s)
+    }, get_data=True, **opts)
+
+    return data
+
+
+# -------- Non-API Functions -----------
+
+''' Example cookie value:
+vi:1*sc:2*cs:1374079443*fs:1374074823*pv:4*seg:{100246.1}*exp:{10001236.{v.10008683-g.{10001841.1}}-10001237.{v.10008687-g.{10001841.1}}}*ps:1374074823
+'''
+
+def getCookieData(cookieStr):
+    parts = cookieStr.split("*")
+    data = {}
+
+    if ":" not in cookieStr:
+      cookieStr = unquote(cookieStr)
+      print(cookieStr)
+      parts = cookieStr.split("*")
+    for p in parts:
+        if p.startswith("vi"):
+            k, v = p.split(":")
+            data["Customer provided ID?"] = False if v == 1 else v
+        if p.startswith("sc"):
+            k, v = p.split(":")
+            data["Session Count"] = int(v)
+        if p.startswith("cs"):
+            k, v = p.split(":")
+            data["Current Session Timestamp"] = datetime.utcfromtimestamp(int(v)).strftime('%Y-%m-%d %H:%M:%S')
+        if p.startswith("fs"):
+            k, v = p.split(":")
+            data["First Session Start Timestamp"] = datetime.utcfromtimestamp(int(v)).strftime('%Y-%m-%d %H:%M:%S')
+        if p.startswith("pv"):
+            k, v = p.split(":")
+            data["Total Pageview Count"] = int(v)
+        if p.startswith("ps"):
+            k, v = p.split(":")
+            data["Previous Session Start Timestamp"] = datetime.utcfromtimestamp(int(v)).strftime('%Y-%m-%d %H:%M:%S')
+        if p.startswith("seg"):
+            k, v = p.split(":")
+            s = v.replace('.', ':')
+            s = re.sub(r'([a-z0-9]+):', r'"\1":', s, flags=re.MULTILINE)
+            j = json.loads(s)
+            data["Segments"] = j
+        if p.startswith("exp"):
+            k, v = p.split(":")
+            s = v.replace('-', ',')
+            s = s.replace('.', ':')
+            s = re.sub(r'([a-z0-9]+):', r'"\1":', s, flags=re.MULTILINE)
+            j = json.loads(s)
+            data["Experiments"] = j
+
+    return data
+
